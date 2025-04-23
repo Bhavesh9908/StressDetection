@@ -1,0 +1,12 @@
+keras
+imutils
+scikit-learn
+matplotlib
+numpy
+scipy
+Flask==2.2.5
+tensorflow==2.11.0
+opencv-python-headless==4.9.0.80
+numpy==1.24.3
+werkzeug==2.2.3
+gunicorn==20.1.0

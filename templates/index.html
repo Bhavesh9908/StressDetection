@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Stress Detection</title>
+  <style>
+    body { font-family: Arial; text-align: center; background: #f8f8f8; }
+    h1 { margin-top: 20px; }
+    #result-box { margin-top: 20px; }
+    .stress { color: red; font-weight: bold; }
+    .non-stress { color: green; font-weight: bold; }
+    img { max-width: 400px; margin-top: 10px; }
+    #uploadForm, #captureForm { display: inline-block; margin: 10px; }
+    button { cursor: pointer; }
+    canvas { display: none; }
+  </style>
+</head>
+<body>
+  <h1>🧠 Stress Detection from Image</h1>
+
+  <!-- Image upload form -->
+  <div id="uploadForm">
+    <h3>Upload Image:</h3>
+    <form id="uploadImageForm" method="POST" action="/" enctype="multipart/form-data">
+      <input type="file" name="image" accept="image/*" required>
+    </form>
+  </div>
+
+  <!-- Capture image form -->
+  <div id="captureForm">
+    <h3>Or capture an image:</h3>
+    <button type="button" onclick="capture()">📸 Capture Photo</button>
+    <form id="captureFormSubmit" method="POST" action="/capture">
+      <input type="hidden" name="image_data" id="image_data">
+    </form>
+  </div>
+
+  <hr style="width: 300px; margin: 20px auto;">
+
+  <!-- Hidden canvas for capturing the photo -->
+  <canvas id="canvas" width="400" height="300"></canvas>
+
+  <!-- Predict button -->
+  <div id="predictForm">
+    <button id="predictButton" type="button" onclick="submitPrediction()">Predict</button>
+  </div>
+
+  {% if image_path %}
+    <div id="result-box">
+      <h3>Analyzed Image</h3>
+      <img src="{{ image_path }}">
+      {% if result.error %}
+        <p style="color: red;">{{ result.error }}</p>
+      {% else %}
+        <p>Emotion: <strong>{{ result.emotion }}</strong> ({{ result.confidence }})</p>
+        <p class="{{ 'stress' if result.stress == 'Stress' else 'non-stress' }}">
+          Stress: {{ result.stress }} ({{ result.stress_score }})
+        </p>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <script>
+    // Show only one form for either upload or capture
+    let imagePath = ''; // To store the selected image or captured data
+
+    function capture() {
+      const canvas = document.getElementById('canvas');
+      const context = canvas.getContext('2d');
+      const imageDataInput = document.getElementById('image_data');
+
+      // Open a dialog to allow the user to select a camera capture
+      navigator.mediaDevices.getUserMedia({ video: true })
+        .then(stream => {
+          // Create video element for live stream
+          const video = document.createElement('video');
+          video.srcObject = stream;
+          video.play();
+
+          // When video is ready, capture the current frame to canvas
+          video.onloadeddata = () => {
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const dataUrl = canvas.toDataURL("image/png");
+            imageDataInput.value = dataUrl;
+            imagePath = dataUrl; // Store the captured data URL
+            video.pause();
+            video.srcObject.getTracks().forEach(track => track.stop());  // Stop streaming
+          };
+        })
+        .catch(error => console.error('Webcam error:', error));
+    }
+
+    // Submit prediction based on the chosen method
+    function submitPrediction() {
+      const uploadForm = document.getElementById('uploadImageForm');
+      const captureForm = document.getElementById('captureFormSubmit');
+      
+      // Check if an image was uploaded or captured
+      if (uploadForm.image.files.length > 0) {
+        // If an image is uploaded, submit the form
+        uploadForm.submit();
+      } else if (imagePath) {
+        // If an image was captured, submit the captured data
+        captureForm.submit();
+      } else {
+        alert("Please upload or capture an image to predict.");
+      }
+    }
+  </script>
+</body>
+</html>
