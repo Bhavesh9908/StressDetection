@@ -3,12 +3,23 @@ import uuid
 import base64
 import cv2
 import numpy as np
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, jsonify
 from tensorflow.keras.models import load_model
 from werkzeug.utils import secure_filename
+import cloudinary
+import cloudinary.uploader
+import cloudinary.api
+from PIL import Image, ImageDraw, ImageFont
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'static/uploads'
+
+# Configure Cloudinary
+cloudinary.config(
+    cloud_name="da4mdjezu",
+    api_key="493281977135412",
+    api_secret="P5xxU64uEjNZy6wITFM5pD5Qu54"
+)
 
 # Load model
 model = load_model('stressdetection.hdf5', compile=False)
@@ -25,10 +36,15 @@ def index():
             file = request.files["image"]
             if file:
                 filename = secure_filename(file.filename)
-                path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
-                file.save(path)
-                result = predict_emotion(path)
-                image_path = path
+                local_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+                file.save(local_path)
+
+                # Upload to Cloudinary
+                upload_result = cloudinary.uploader.upload(local_path)
+                image_url = upload_result['secure_url']
+
+                result = predict_emotion(local_path)
+                image_path = image_url
 
     return render_template("index.html", result=result, image_path=image_path)
 
@@ -37,11 +53,47 @@ def capture():
     data = request.form["image_data"].split(",")[1]
     img_bytes = base64.b64decode(data)
     filename = f"{uuid.uuid4().hex}.png"
-    path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
-    with open(path, "wb") as f:
+    local_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+    with open(local_path, "wb") as f:
         f.write(img_bytes)
-    result = predict_emotion(path)
-    return render_template("index.html", result=result, image_path=path)
+
+    # Upload to Cloudinary
+    upload_result = cloudinary.uploader.upload(local_path)
+    image_url = upload_result['secure_url']
+
+    result = predict_emotion(local_path)
+    return render_template("index.html", result=result, image_path=image_url)
+
+def annotate_image_with_info(image_path, emotion, stress, stress_score):
+    img = Image.open(image_path).convert("RGB")
+    draw = ImageDraw.Draw(img)
+
+    try:
+        # Use a better font if available
+        font = ImageFont.truetype("arial.ttf", 25)
+    except:
+        font = ImageFont.load_default()
+
+    # Text to write
+    text_lines = [
+        f"Emotion: {emotion}",
+        f"Stress: {stress}",
+        f"Stress Score: {stress_score}"
+    ]
+
+    # Starting position
+    x, y = 10, 10
+
+    # Add text to image
+    for line in text_lines:
+        draw.text((x, y), line, fill="red", font=font)
+        y += 30  # Move down for next line
+
+    # Save the updated image (overwrite or save to new path)
+    annotated_path = "static/annotated_result.jpg"
+    img.save(annotated_path)
+    
+    return annotated_path
 
 def predict_emotion(image_path):
     image = cv2.imread(image_path)
@@ -65,11 +117,21 @@ def predict_emotion(image_path):
     stress_score = sum([preds[emotion_labels.index(e)] for e in stress_emotions]) * 100
     stress = "Stress" if stress_score >= 50 else "Non-Stress"
 
+    # Annotate image with emotion and stress information
+    annotated_image_path = annotate_image_with_info(
+        image_path, emotion, stress, f"{stress_score:.1f}%"
+    )
+
+    # Upload the annotated image to Cloudinary
+    cloudinary_result = cloudinary.uploader.upload(annotated_image_path)
+    annotated_image_url = cloudinary_result['secure_url']
+
     return {
         "emotion": emotion,
         "confidence": f"{confidence:.1f}%",
         "stress": stress,
-        "stress_score": f"{stress_score:.1f}%"
+        "stress_score": f"{stress_score:.1f}%",
+        "image_url": annotated_image_url
     }
 
 if __name__ == "__main__":

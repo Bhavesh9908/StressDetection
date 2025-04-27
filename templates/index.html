@@ -9,10 +9,44 @@
     #result-box { margin-top: 20px; }
     .stress { color: red; font-weight: bold; }
     .non-stress { color: green; font-weight: bold; }
-    img { max-width: 400px; margin-top: 10px; }
+    img { max-width: 400px; margin-top: 10px; cursor: pointer; }
     #uploadForm, #captureForm { display: inline-block; margin: 10px; }
-    button { cursor: pointer; }
+    button { cursor: pointer; padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; }
     canvas { display: none; }
+    /* Modal Styling */
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 999;
+      padding-top: 60px;
+      left: 0; top: 0;
+      width: 100%; height: 100%;
+      background-color: rgba(0, 0, 0, 0.8);
+    }
+    .modal-content {
+      margin: auto;
+      display: block;
+      max-width: 90%;
+      max-height: 80%;
+    }
+    .close {
+      position: absolute;
+      top: 20px;
+      right: 35px;
+      color: white;
+      font-size: 40px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    pre {
+      background: #eeeeee;
+      text-align: left;
+      display: inline-block;
+      padding: 15px;
+      border-radius: 5px;
+      overflow-x: auto;
+      max-width: 90%;
+    }
   </style>
 </head>
 <body>
@@ -21,18 +55,13 @@
   <!-- Image upload form -->
   <div id="uploadForm">
     <h3>Upload Image:</h3>
-    <form id="uploadImageForm" method="POST" action="/" enctype="multipart/form-data">
-      <input type="file" name="image" accept="image/*" required>
-    </form>
+    <input type="file" id="uploadImageInput" accept="image/*" required>
   </div>
 
   <!-- Capture image form -->
   <div id="captureForm">
     <h3>Or capture an image:</h3>
     <button type="button" onclick="capture()">📸 Capture Photo</button>
-    <form id="captureFormSubmit" method="POST" action="/capture">
-      <input type="hidden" name="image_data" id="image_data">
-    </form>
   </div>
 
   <hr style="width: 300px; margin: 20px auto;">
@@ -40,70 +69,100 @@
   <!-- Hidden canvas for capturing the photo -->
   <canvas id="canvas" width="400" height="300"></canvas>
 
+  <!-- Preview Selected/Captured Image -->
+  <div id="previewArea">
+    <h3>Preview:</h3>
+    <img id="previewImage" style="display:none;">
+  </div>
+
   <!-- Predict button -->
-  <div id="predictForm">
+  <div id="predictForm" style="margin-top:20px;">
+    <form id="predictFormUpload" method="POST" action="/" enctype="multipart/form-data" style="display: none;">
+      <input type="file" name="image" id="hiddenFileInput" style="display:none;">
+    </form>
+
+    <form id="predictFormCapture" method="POST" action="/capture" style="display: none;">
+      <input type="hidden" name="image_data" id="image_data_hidden">
+    </form>
+
     <button id="predictButton" type="button" onclick="submitPrediction()">Predict</button>
   </div>
 
-  {% if image_path %}
+  {% if result %}
     <div id="result-box">
-      <h3>Analyzed Image</h3>
-      <img src="{{ image_path }}">
+      <h3>Prediction JSON:</h3>
+      <pre>{{ result | tojson(indent=2) }}</pre>
+
+      {% if result.cloudinary_url %}
+        <h4>Annotated Image:</h4>
+        <img src="{{ result.cloudinary_url }}" alt="Analyzed Image">
+      {% endif %}
+
       {% if result.error %}
         <p style="color: red;">{{ result.error }}</p>
-      {% else %}
-        <p>Emotion: <strong>{{ result.emotion }}</strong> ({{ result.confidence }})</p>
-        <p class="{{ 'stress' if result.stress == 'Stress' else 'non-stress' }}">
-          Stress: {{ result.stress }} ({{ result.stress_score }})
-        </p>
       {% endif %}
     </div>
   {% endif %}
 
   <script>
-    // Show only one form for either upload or capture
-    let imagePath = ''; // To store the selected image or captured data
+    let selectedMethod = ""; // To know if upload or capture
+    let capturedDataUrl = "";
 
+    // Handle image upload preview
+    document.getElementById('uploadImageInput').addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = function(evt) {
+          document.getElementById('previewImage').src = evt.target.result;
+          document.getElementById('previewImage').style.display = 'block';
+        };
+        reader.readAsDataURL(file);
+
+        // Copy uploaded file to hidden input for form submission
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(file);
+        document.getElementById('hiddenFileInput').files = dataTransfer.files;
+
+        selectedMethod = "upload";
+      }
+    });
+
+    // Handle capture
     function capture() {
       const canvas = document.getElementById('canvas');
       const context = canvas.getContext('2d');
-      const imageDataInput = document.getElementById('image_data');
 
-      // Open a dialog to allow the user to select a camera capture
       navigator.mediaDevices.getUserMedia({ video: true })
         .then(stream => {
-          // Create video element for live stream
           const video = document.createElement('video');
           video.srcObject = stream;
           video.play();
 
-          // When video is ready, capture the current frame to canvas
           video.onloadeddata = () => {
             context.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const dataUrl = canvas.toDataURL("image/png");
-            imageDataInput.value = dataUrl;
-            imagePath = dataUrl; // Store the captured data URL
+            capturedDataUrl = canvas.toDataURL("image/png");
+            document.getElementById('previewImage').src = capturedDataUrl;
+            document.getElementById('previewImage').style.display = 'block';
+
+            document.getElementById('image_data_hidden').value = capturedDataUrl;
+            selectedMethod = "capture";
+
             video.pause();
-            video.srcObject.getTracks().forEach(track => track.stop());  // Stop streaming
+            video.srcObject.getTracks().forEach(track => track.stop());
           };
         })
         .catch(error => console.error('Webcam error:', error));
     }
 
-    // Submit prediction based on the chosen method
+    // Submit form based on selected method
     function submitPrediction() {
-      const uploadForm = document.getElementById('uploadImageForm');
-      const captureForm = document.getElementById('captureFormSubmit');
-      
-      // Check if an image was uploaded or captured
-      if (uploadForm.image.files.length > 0) {
-        // If an image is uploaded, submit the form
-        uploadForm.submit();
-      } else if (imagePath) {
-        // If an image was captured, submit the captured data
-        captureForm.submit();
+      if (selectedMethod === "upload") {
+        document.getElementById('predictFormUpload').submit();
+      } else if (selectedMethod === "capture") {
+        document.getElementById('predictFormCapture').submit();
       } else {
-        alert("Please upload or capture an image to predict.");
+        alert("Please upload or capture an image first!");
       }
     }
   </script>
