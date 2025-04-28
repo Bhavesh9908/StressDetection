@@ -21,7 +21,7 @@ cloudinary.config(
     api_secret="P5xxU64uEjNZy6wITFM5pD5Qu54"
 )
 
-# Load model
+# Directly Load the model (since it's inside your project)
 model = load_model('stressdetection.hdf5', compile=False)
 emotion_labels = ['Angry', 'Disgust', 'Fear', 'Happy', 'Sad', 'Surprise', 'Neutral']
 stress_emotions = ['Angry', 'Disgust', 'Fear', 'Sad']
@@ -69,33 +69,29 @@ def annotate_image_with_info(image_path, emotion, stress, stress_score):
     draw = ImageDraw.Draw(img)
 
     try:
-        # Use a better font if available
-        font = ImageFont.truetype("arial.ttf", 25)
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 25)
     except:
         font = ImageFont.load_default()
 
-    # Text to write
     text_lines = [
         f"Emotion: {emotion}",
         f"Stress: {stress}",
         f"Stress Score: {stress_score}"
     ]
 
-    # Starting position
     x, y = 10, 10
-
-    # Add text to image
     for line in text_lines:
         draw.text((x, y), line, fill="red", font=font)
-        y += 30  # Move down for next line
+        y += 30
 
-    # Save the updated image (overwrite or save to new path)
     annotated_path = "static/annotated_result.jpg"
     img.save(annotated_path)
-    
+
     return annotated_path
 
 def predict_emotion(image_path):
+    print("[INFO] Processing image:", image_path)
+
     image = cv2.imread(image_path)
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
@@ -103,7 +99,8 @@ def predict_emotion(image_path):
     faces = face_cascade.detectMultiScale(gray, 1.1, 4)
 
     if len(faces) == 0:
-        return {"error": "No face detected."}
+        print("[WARNING] No face detected.")
+        return {"error": "No face detected. Please try again with a clear face."}
 
     (x, y, w, h) = faces[0]
     roi = gray[y:y+h, x:x+w]
@@ -117,12 +114,11 @@ def predict_emotion(image_path):
     stress_score = sum([preds[emotion_labels.index(e)] for e in stress_emotions]) * 100
     stress = "Stress" if stress_score >= 50 else "Non-Stress"
 
-    # Annotate image with emotion and stress information
     annotated_image_path = annotate_image_with_info(
         image_path, emotion, stress, f"{stress_score:.1f}%"
     )
 
-    # Upload the annotated image to Cloudinary
+    # Upload the annotated image
     cloudinary_result = cloudinary.uploader.upload(annotated_image_path)
     annotated_image_url = cloudinary_result['secure_url']
 
