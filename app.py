@@ -10,29 +10,33 @@ from werkzeug.utils import secure_filename
 import cloudinary
 import cloudinary.uploader
 from PIL import Image, ImageDraw, ImageFont
+import tensorflow as tf
+
+# Prevent TF from pre-allocating all memory
+try:
+    tf.config.experimental.set_memory_growth(tf.config.list_physical_devices('CPU')[0], True)
+except:
+    pass
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'static/uploads'
-
-# Ensure upload folder exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# Configure Cloudinary
+# Cloudinary config
 cloudinary.config(
     cloud_name="da4mdjezu",
     api_key="493281977135412",
     api_secret="P5xxU64uEjNZy6wITFM5pD5Qu54"
 )
 
-# Load model once at startup
+# Load model once
 logging.debug("Loading model...")
 model = load_model('stressdetection.hdf5', compile=False)
 logging.debug("Model loaded successfully.")
 
-# Labels
 emotion_labels = ['Angry', 'Disgust', 'Fear', 'Happy', 'Sad', 'Surprise', 'Neutral']
 stress_emotions = ['Angry', 'Disgust', 'Fear', 'Sad']
 
@@ -101,7 +105,6 @@ def annotate_image_with_info(image_path, emotion, stress, stress_score):
     try:
         img = Image.open(image_path).convert("RGB")
         draw = ImageDraw.Draw(img)
-
         try:
             font = ImageFont.truetype("arial.ttf", 25)
         except:
@@ -112,7 +115,6 @@ def annotate_image_with_info(image_path, emotion, stress, stress_score):
             f"Stress: {stress}",
             f"Stress Score: {stress_score}"
         ]
-
         x, y = 10, 10
         for line in lines:
             draw.text((x, y), line, fill="red", font=font)
@@ -129,6 +131,9 @@ def predict_emotion(image_path):
     try:
         logging.debug(f"Predicting emotion for image: {image_path}")
         image = cv2.imread(image_path)
+        if image is None:
+            raise ValueError("Image could not be loaded.")
+
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
         face_cascade = cv2.CascadeClassifier(
