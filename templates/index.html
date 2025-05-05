@@ -2,136 +2,168 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Stress Detection App</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stress Detection</title>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      padding: 20px;
-      background: #f0f0f0;
-      text-align: center;
+    body { font-family: Arial; text-align: center; background: #f8f8f8; }
+    h1 { margin-top: 20px; }
+    #result-box { margin-top: 20px; }
+    .stress { color: red; font-weight: bold; }
+    .non-stress { color: green; font-weight: bold; }
+    img { max-width: 400px; margin-top: 10px; cursor: pointer; }
+    #uploadForm, #captureForm { display: inline-block; margin: 10px; }
+    button { cursor: pointer; padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; }
+    canvas { display: none; }
+    /* Modal Styling */
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 999;
+      padding-top: 60px;
+      left: 0; top: 0;
+      width: 100%; height: 100%;
+      background-color: rgba(0, 0, 0, 0.8);
     }
-
-    h1 {
-      color: #333;
+    .modal-content {
+      margin: auto;
+      display: block;
+      max-width: 90%;
+      max-height: 80%;
     }
-
-    form {
-      margin: 20px auto;
-    }
-
-    input[type="file"] {
-      margin-bottom: 10px;
-    }
-
-    button {
-      padding: 10px 20px;
-      margin: 10px;
-      border: none;
-      background: #007BFF;
+    .close {
+      position: absolute;
+      top: 20px;
+      right: 35px;
       color: white;
-      font-size: 16px;
-      border-radius: 5px;
+      font-size: 40px;
+      font-weight: bold;
       cursor: pointer;
     }
-
-    button:hover {
-      background: #0056b3;
-    }
-
-    img {
-      max-width: 90%;
-      height: auto;
-      margin-top: 20px;
-      border: 2px solid #ccc;
-    }
-
-    #video {
-      display: block;
-      margin: 20px auto;
-      border: 2px solid #ccc;
-    }
-
-    #canvas {
-      display: none;
-    }
-
-    .result {
-      background: #fff;
+    pre {
+      background: #eeeeee;
+      text-align: left;
+      display: inline-block;
       padding: 15px;
-      margin: 20px auto;
-      border-radius: 10px;
-      max-width: 500px;
-      box-shadow: 0 0 10px rgba(0,0,0,0.1);
-    }
-
-    .error {
-      color: red;
+      border-radius: 5px;
+      overflow-x: auto;
+      max-width: 90%;
     }
   </style>
 </head>
 <body>
-  <h1>Stress Detection App</h1>
+  <h1>🧠 Stress Detection from Image</h1>
 
-  <!-- Upload Form -->
-  <form method="POST" enctype="multipart/form-data">
-    <input type="file" name="image" accept="image/*" required>
-    <br>
-    <button type="submit">Upload & Analyze</button>
-  </form>
+  <!-- Image upload form -->
+  <div id="uploadForm">
+    <h3>Upload Image:</h3>
+    <input type="file" id="uploadImageInput" accept="image/*" required>
+  </div>
 
-  <!-- Webcam Capture Section -->
-  <h2>Or Capture from Webcam</h2>
-  <video id="video" width="320" height="240" autoplay></video>
-  <br>
-  <button onclick="captureImage()">Capture & Analyze</button>
+  <!-- Capture image form -->
+  <div id="captureForm">
+    <h3>Or capture an image:</h3>
+    <button type="button" onclick="capture()">📸 Capture Photo</button>
+  </div>
 
-  <form id="capture-form" method="POST" action="/capture">
-    <input type="hidden" name="image_data" id="image_data">
-  </form>
+  <hr style="width: 300px; margin: 20px auto;">
 
-  <canvas id="canvas" width="320" height="240"></canvas>
+  <!-- Hidden canvas for capturing the photo -->
+  <canvas id="canvas" width="400" height="300"></canvas>
 
-  <!-- Result Display -->
+  <!-- Preview Selected/Captured Image -->
+  <div id="previewArea">
+    <h3>Preview:</h3>
+    <img id="previewImage" style="display:none;">
+  </div>
+
+  <!-- Predict button -->
+  <div id="predictForm" style="margin-top:20px;">
+    <form id="predictFormUpload" method="POST" action="/" enctype="multipart/form-data" style="display: none;">
+      <input type="file" name="image" id="hiddenFileInput" style="display:none;">
+    </form>
+
+    <form id="predictFormCapture" method="POST" action="/capture" style="display: none;">
+      <input type="hidden" name="image_data" id="image_data_hidden">
+    </form>
+
+    <button id="predictButton" type="button" onclick="submitPrediction()">Predict</button>
+  </div>
+
   {% if result %}
-    <div class="result">
-      {% if result.error %}
-        <p class="error">{{ result.error }}</p>
-      {% else %}
-        <h3>Prediction Result:</h3>
-        <p><strong>Emotion:</strong> {{ result.emotion }}</p>
-        <p><strong>Confidence:</strong> {{ result.confidence }}</p>
-        <p><strong>Stress:</strong> {{ result.stress }}</p>
-        <p><strong>Stress Score:</strong> {{ result.stress_score }}</p>
+    <div id="result-box">
+      <h3>Prediction JSON:</h3>
+      <pre>{{ result | tojson(indent=2) }}</pre>
 
-        {% if result.annotated_image_url %}
-          <h4>Annotated Image:</h4>
-          <img src="{{ result.annotated_image_url }}" alt="Analyzed Image">
-        {% endif %}
+      {% if result.cloudinary_url %}
+        <h4>Annotated Image:</h4>
+        <img src="{{ result.cloudinary_url }}" alt="Analyzed Image">
+      {% endif %}
+
+      {% if result.error %}
+        <p style="color: red;">{{ result.error }}</p>
       {% endif %}
     </div>
   {% endif %}
 
   <script>
-    const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
-    const imageDataInput = document.getElementById('image_data');
+    let selectedMethod = ""; // To know if upload or capture
+    let capturedDataUrl = "";
 
-    // Access webcam
-    navigator.mediaDevices.getUserMedia({ video: true })
-      .then(stream => {
-        video.srcObject = stream;
-      })
-      .catch(err => {
-        console.error("Camera access denied:", err);
-      });
+    // Handle image upload preview
+    document.getElementById('uploadImageInput').addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = function(evt) {
+          document.getElementById('previewImage').src = evt.target.result;
+          document.getElementById('previewImage').style.display = 'block';
+        };
+        reader.readAsDataURL(file);
 
-    function captureImage() {
+        // Copy uploaded file to hidden input for form submission
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(file);
+        document.getElementById('hiddenFileInput').files = dataTransfer.files;
+
+        selectedMethod = "upload";
+      }
+    });
+
+    // Handle capture
+    function capture() {
+      const canvas = document.getElementById('canvas');
       const context = canvas.getContext('2d');
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL('image/png');
-      imageDataInput.value = dataUrl;
-      document.getElementById('capture-form').submit();
+
+      navigator.mediaDevices.getUserMedia({ video: true })
+        .then(stream => {
+          const video = document.createElement('video');
+          video.srcObject = stream;
+          video.play();
+
+          video.onloadeddata = () => {
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            capturedDataUrl = canvas.toDataURL("image/png");
+            document.getElementById('previewImage').src = capturedDataUrl;
+            document.getElementById('previewImage').style.display = 'block';
+
+            document.getElementById('image_data_hidden').value = capturedDataUrl;
+            selectedMethod = "capture";
+
+            video.pause();
+            video.srcObject.getTracks().forEach(track => track.stop());
+          };
+        })
+        .catch(error => console.error('Webcam error:', error));
+    }
+
+    // Submit form based on selected method
+    function submitPrediction() {
+      if (selectedMethod === "upload") {
+        document.getElementById('predictFormUpload').submit();
+      } else if (selectedMethod === "capture") {
+        document.getElementById('predictFormCapture').submit();
+      } else {
+        alert("Please upload or capture an image first!");
+      }
     }
   </script>
 </body>
