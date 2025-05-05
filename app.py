@@ -32,6 +32,11 @@ logging.debug("Model loaded successfully.")
 emotion_labels = ['Angry', 'Disgust', 'Fear', 'Happy', 'Sad', 'Surprise', 'Neutral']
 stress_emotions = ['Angry', 'Disgust', 'Fear', 'Sad']
 
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+
+def allowed_file(file):
+    return file and file.content_length <= MAX_FILE_SIZE
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     logging.debug("Inside index route")
@@ -41,16 +46,36 @@ def index():
     if request.method == "POST":
         if "image" in request.files:
             file = request.files["image"]
+            if not allowed_file(file):
+                logging.error("File size is too large")
+                return jsonify({"error": "File size too large. Please upload a smaller image."}), 400
+
             if file:
                 filename = secure_filename(file.filename)
                 local_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
-                file.save(local_path)
+                try:
+                    logging.debug(f"Saving file to {local_path}")
+                    file.save(local_path)
+                except Exception as e:
+                    logging.error(f"Error saving file: {e}")
+                    return jsonify({"error": "Error saving file"}), 500
 
-                # Upload to Cloudinary
-                upload_result = cloudinary.uploader.upload(local_path)
-                image_url = upload_result['secure_url']
+                try:
+                    # Upload to Cloudinary
+                    upload_result = cloudinary.uploader.upload(local_path)
+                    image_url = upload_result['secure_url']
+                    logging.debug(f"File uploaded to Cloudinary: {image_url}")
+                except Exception as e:
+                    logging.error(f"Cloudinary upload failed: {e}")
+                    return jsonify({"error": "Cloudinary upload failed"}), 500
 
-                result = predict_emotion(local_path)
+                try:
+                    result = predict_emotion(local_path)
+                    logging.debug(f"Prediction result: {result}")
+                except Exception as e:
+                    logging.error(f"Prediction failed: {e}")
+                    return jsonify({"error": "Prediction failed"}), 500
+
                 image_path = image_url
 
     return render_template("index.html", result=result, image_path=image_path)
@@ -65,13 +90,17 @@ def capture():
         f.write(img_bytes)
 
     # Upload to Cloudinary
-    upload_result = cloudinary.uploader.upload(local_path)
-    image_url = upload_result['secure_url']
+    try:
+        upload_result = cloudinary.uploader.upload(local_path)
+        image_url = upload_result['secure_url']
+        logging.debug(f"Captured image uploaded to Cloudinary: {image_url}")
+    except Exception as e:
+        logging.error(f"Cloudinary upload failed: {e}")
+        return jsonify({"error": "Cloudinary upload failed"}), 500
 
     result = predict_emotion(local_path)
     return render_template("index.html", result=result, image_path=image_url)
 
-# ➡️ New API route that returns JSON for your app
 @app.route("/api/predict", methods=["POST"])
 def api_predict():
     logging.debug("Inside API predict route")
@@ -80,6 +109,9 @@ def api_predict():
         return jsonify({"error": "No image provided"}), 400
 
     file = request.files["image"]
+    if not allowed_file(file):
+        return jsonify({"error": "File size too large. Please upload a smaller image."}), 400
+
     if file:
         filename = secure_filename(file.filename)
         local_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
@@ -161,4 +193,4 @@ def predict_emotion(image_path):
 if __name__ == "__main__":
     os.makedirs("static/uploads", exist_ok=True)
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    app.run(host="0.0.0.0", port=port, debug=True, use_reloader=False)
