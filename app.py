@@ -34,8 +34,27 @@ stress_emotions = ['Angry', 'Disgust', 'Fear', 'Sad']
 
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 
+
 def allowed_file(file):
     return file and file.content_length <= MAX_FILE_SIZE
+
+
+def compress_image_to_target_size(image_path, target_size_kb=30):
+    """Compress image to be under target size in KB."""
+    target_bytes = target_size_kb * 1024
+    img = Image.open(image_path).convert("RGB")
+
+    quality = 95
+    temp_path = image_path.replace(".png", ".jpg").replace(".jpeg", ".jpg")
+
+    while quality > 10:
+        img.save(temp_path, format="JPEG", quality=quality)
+        if os.path.getsize(temp_path) <= target_bytes:
+            break
+        quality -= 5
+
+    return temp_path
+
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -54,15 +73,14 @@ def index():
                 filename = secure_filename(file.filename)
                 local_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
                 try:
-                    logging.debug(f"Saving file to {local_path}")
                     file.save(local_path)
+                    compressed_path = compress_image_to_target_size(local_path)
                 except Exception as e:
-                    logging.error(f"Error saving file: {e}")
-                    return jsonify({"error": "Error saving file"}), 500
+                    logging.error(f"Error saving/compressing file: {e}")
+                    return jsonify({"error": "Error saving or compressing file"}), 500
 
                 try:
-                    # Upload to Cloudinary
-                    upload_result = cloudinary.uploader.upload(local_path)
+                    upload_result = cloudinary.uploader.upload(compressed_path)
                     image_url = upload_result['secure_url']
                     logging.debug(f"File uploaded to Cloudinary: {image_url}")
                 except Exception as e:
@@ -70,7 +88,7 @@ def index():
                     return jsonify({"error": "Cloudinary upload failed"}), 500
 
                 try:
-                    result = predict_emotion(local_path)
+                    result = predict_emotion(compressed_path)
                     logging.debug(f"Prediction result: {result}")
                 except Exception as e:
                     logging.error(f"Prediction failed: {e}")
@@ -79,6 +97,7 @@ def index():
                 image_path = image_url
 
     return render_template("index.html", result=result, image_path=image_path)
+
 
 @app.route("/capture", methods=["POST"])
 def capture():
@@ -89,22 +108,23 @@ def capture():
     with open(local_path, "wb") as f:
         f.write(img_bytes)
 
-    # Upload to Cloudinary
     try:
-        upload_result = cloudinary.uploader.upload(local_path)
+        compressed_path = compress_image_to_target_size(local_path)
+        upload_result = cloudinary.uploader.upload(compressed_path)
         image_url = upload_result['secure_url']
         logging.debug(f"Captured image uploaded to Cloudinary: {image_url}")
     except Exception as e:
         logging.error(f"Cloudinary upload failed: {e}")
         return jsonify({"error": "Cloudinary upload failed"}), 500
 
-    result = predict_emotion(local_path)
+    result = predict_emotion(compressed_path)
     return render_template("index.html", result=result, image_path=image_url)
+
 
 @app.route("/api/predict", methods=["POST"])
 def api_predict():
     logging.debug("Inside API predict route")
-    
+
     if "image" not in request.files:
         return jsonify({"error": "No image provided"}), 400
 
@@ -117,13 +137,13 @@ def api_predict():
         local_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
         file.save(local_path)
 
-        # Predict
-        result = predict_emotion(local_path)
+        compressed_path = compress_image_to_target_size(local_path)
 
-        # Return result as JSON
+        result = predict_emotion(compressed_path)
         return jsonify(result)
 
     return jsonify({"error": "Invalid image upload"}), 400
+
 
 def annotate_image_with_info(image_path, emotion, stress, stress_score):
     img = Image.open(image_path).convert("RGB")
@@ -148,8 +168,9 @@ def annotate_image_with_info(image_path, emotion, stress, stress_score):
 
     annotated_path = "static/annotated_result.jpg"
     img.save(annotated_path)
-    
+
     return annotated_path
+
 
 def predict_emotion(image_path):
     logging.debug(f"Predicting emotion for image: {image_path}")
@@ -189,6 +210,7 @@ def predict_emotion(image_path):
         "stress_score": f"{stress_score:.1f}%",
         "image_url": annotated_image_url
     }
+
 
 if __name__ == "__main__":
     os.makedirs("static/uploads", exist_ok=True)
